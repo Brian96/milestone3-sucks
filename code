@@ -1,0 +1,503 @@
+
+
+module tafang
+	(
+		CLOCK_50,						//	On Board 50 MHz
+		KEY,
+		// Your inputs and outputs here
+		// The ports below are for the VGA output.  Do not change.
+		VGA_CLK,   						//	VGA Clock
+		VGA_HS,							//	VGA H_SYNC
+		VGA_VS,							//	VGA V_SYNC
+		VGA_BLANK_N,						//	VGA BLANK
+		VGA_SYNC_N,						//	VGA SYNC
+		VGA_R,   						//	VGA Red[9:0]
+		VGA_G,	 						//	VGA Green[9:0]
+		VGA_B   						//	VGA Blue[9:0]
+	);
+
+	input			CLOCK_50;				//	50 MHz
+	input [3:0]KEY;
+	// Declare your inputs and outputs here
+	// Do not change the following outputs
+	output			VGA_CLK;   				//	VGA Clock
+	output			VGA_HS;					//	VGA H_SYNC
+	output			VGA_VS;					//	VGA V_SYNC
+	output			VGA_BLANK_N;				//	VGA BLANK
+	output			VGA_SYNC_N;				//	VGA SYNC
+	output	[9:0]	VGA_R;   				//	VGA Red[9:0]
+	output	[9:0]	VGA_G;	 				//	VGA Green[9:0]
+	output	[9:0]	VGA_B;   				//	VGA Blue[9:0]
+	
+	wire resetn;
+	assign resetn = KEY[0];
+	
+	// Create the colour, x, y and writeEn wires that are inputs to the controller.
+
+	wire [2:0] colour;
+	wire [8:0] x;
+	wire [7:0] y;
+	wire writeEn;
+	
+	minionMove mm(
+	.rawclock(CLOCK_50),
+	.x(x),
+	.y(y),
+	.writeEn(writeEn),
+	.colour(colour)
+	);
+
+	
+	// Create an Instance of a VGA controller - there can be only one!
+	// Define the number of colours as well as the initial background
+	// image file (.MIF) for the controller.
+	vga_adapter VGA(
+			.resetn(resetn),
+			.clock(CLOCK_50),
+			.colour(colour),
+			.x(x),
+			.y(y),
+			.plot(writeEn),
+			/* Signals for the DAC to drive the monitor. */
+			.VGA_R(VGA_R),
+			.VGA_G(VGA_G),
+			.VGA_B(VGA_B),
+			.VGA_HS(VGA_HS),
+			.VGA_VS(VGA_VS),
+			.VGA_BLANK(VGA_BLANK_N),
+			.VGA_SYNC(VGA_SYNC_N),
+			.VGA_CLK(VGA_CLK));
+		defparam VGA.RESOLUTION = "320x240";
+		defparam VGA.MONOCHROME = "FALSE";
+		defparam VGA.BITS_PER_COLOUR_CHANNEL = 1;
+		defparam VGA.BACKGROUND_IMAGE = "mainbg.mif";
+			
+	// Put your code here. Your code should produce signals x,y,colour and writeEn
+	// for the VGA controller, in addition to any other functionality your design may require.
+	
+	
+endmodule
+
+module minionMove(
+	input rawclock,
+	output reg[8:0] x,
+	output reg[7:0] y,
+	output reg writeEn,
+	output reg[2:0] colour
+);
+
+
+wire [9:0]mm1x;
+wire [9:0]mm2x;
+wire [8:0]mm1y;
+wire [8:0]mm2y;
+wire [2:0]mm1c;
+wire [2:0]mm2c;
+wire writeEn1;
+wire writeEn2;
+
+minionMoveOneWave mmow1(
+	.rawclock(rawclock),
+	.start(start1),
+	.x(mm1x),
+	.y(mm1y),
+	.writeEn(writeEn1),
+	.colour(mm1c)
+);
+
+minionMoveOneWave mmow2(
+	.rawclock(rawclock),
+	.start(start2),
+	.x(mm2x),
+	.y(mm2y),
+	.writeEn(writeEn2),
+	.colour(mm2c)
+);
+
+
+reg [49:0] cyclecounter1;
+reg s1;
+reg s2;
+reg s3;
+wire start1;
+assign start1 = s1;
+wire start2;
+assign start2 = s2;
+wire start3;
+assign start3 = s3;
+
+
+//this always block set the start of each waves
+always@ (posedge rawclock)
+begin
+if (cyclecounter1 == 50'b0)
+begin
+s1 <= 1'b1;
+cyclecounter1 <= cyclecounter1 + 1'b1;
+end
+else if (cyclecounter1 == 50'd5001000)
+begin
+s2 <= 1'b1;
+cyclecounter1 <= cyclecounter1 + 1'b1;
+end
+else if (cyclecounter1 == 50'd500000000000)
+begin
+cyclecounter1 <= 50'b0;
+end
+else
+begin
+cyclecounter1 <= cyclecounter1 + 1'b1;
+end
+end
+
+
+reg [25:0] cyclecounter2;
+
+//this always block set the "whosturn" variable
+always@ (posedge rawclock)
+begin
+if (cyclecounter2 == 26'd5000000)
+begin
+cyclecounter2 <= 26'b0;
+end
+else if(cyclecounter2 < 26'd1000 && cyclecounter2 >= 26'd0)
+begin
+cyclecounter2 <= cyclecounter2 + 1'b1;
+//
+x <= mm1x;
+y <= mm1y;
+writeEn <= writeEn1;
+colour <= mm1c;
+//
+end
+else if(cyclecounter2 < 26'd2000 && cyclecounter2 >= 26'd1000)
+begin
+cyclecounter2 <= cyclecounter2 + 1'b1;
+//
+x <= mm2x;
+y <= mm2y;
+writeEn <= writeEn2;
+colour <= mm2c;
+//
+end
+else
+begin
+cyclecounter2 <= cyclecounter2 + 1'b1;
+end
+end
+
+endmodule
+
+module minionMoveOneWave(
+	input rawclock,
+	input start,
+	output reg[8:0]x,
+	output reg[7:0]y,
+	output reg writeEn,
+	output reg[2:0]colour
+);
+
+	reg [25:0]cyclecounter;
+	reg move1;
+	reg move2;
+	reg move3;
+	
+	//the always block to get when different minion need to move
+	always@ (posedge rawclock)
+	begin
+	move1 = 1'b0;
+	move2 = 1'b0;
+	move3 = 1'b0;
+	if (start == 1'b0)
+	begin
+	cyclecounter = 26'b0;
+	end
+	
+	else if (cyclecounter == 26'd5000000)
+	begin
+	cyclecounter = 26'b0;
+	end
+	
+	else if (cyclecounter == 26'd100)
+	begin
+	move1 = 1'b1;
+	cyclecounter = cyclecounter + 1'b1;
+	end
+	
+	else if (cyclecounter == 26'd200)
+	begin
+	move2 = 1'b1;
+	cyclecounter = cyclecounter + 1'b1;
+	end
+	
+	else if (cyclecounter == 26'd300)
+	begin
+	move3 = 1'b1;
+	cyclecounter = cyclecounter + 1'b1;
+	end
+	
+	else
+	begin
+	cyclecounter = cyclecounter + 1'b1;
+	end
+	
+	end
+
+	wire [7:0]mimi1y;
+	wire [7:0]mimi2y;
+	wire [7:0]mimi3y;
+	wire [8:0]mimi1x;
+	assign mimi1x = 9'd120;
+	wire [8:0]mimi2x;
+	assign mimi2x = 9'd160;
+	wire [8:0]mimi3x;
+	assign mimi3x = 9'd200;
+	wire [8:0]curx1;
+	wire [8:0]curx2;
+	wire [8:0]curx3;
+	wire [2:0]colour1;
+	wire [2:0]colour2;
+	wire [2:0]colour3;
+	wire turn1;
+	wire turn2;
+	wire turn3;
+	wire erase1;
+	wire erase2;
+	wire erase3;
+
+	//this part change the y value of different minions
+	
+	triangleminion trian1(
+		.rawclock(rawclock),
+		.moveclock(move1),
+		.inerase(erase1),
+		.centerx(mimi1x),
+		.oldy(mimi1y),
+		._x(curx1),
+		._y(mimi1y),
+		._colour(colour1),
+		.yourturn(turn1),
+		.erase(erase1)
+);
+
+	triangleminion trian2(
+		.rawclock(rawclock),
+		.moveclock(move2),
+		.inerase(erase2),
+		.centerx(mimi2x),
+		.oldy(mimi2y),
+		._x(curx2),
+		._y(mimi2y),
+		._colour(colour2),
+		.yourturn(turn2),
+		.erase(erase2)
+);
+	triangleminion trian3(
+		.rawclock(rawclock),
+		.moveclock(move3),
+		.inerase(erase3),
+		.centerx(mimi3x),
+		.oldy(mimi3y),
+		._x(curx3),
+		._y(mimi3y),
+		._colour(colour3),
+		.yourturn(turn3),
+		.erase(erase3)
+);
+	
+	//this part return the value of different minion y back to upper module
+	always @(posedge rawclock)
+	begin
+	if (turn1 | erase1)
+	begin
+	x = curx1;
+	y = mimi1y;
+	writeEn = 1'b1;
+	colour = colour1;
+	end
+
+	else if(turn2 | erase2)
+	begin
+	x = curx2;
+	y = mimi2y;
+	writeEn = 1'b1;
+	colour = colour2;
+	end
+	
+	else if(turn3 | erase3)
+	begin
+	x = curx3;
+	y = mimi3y;
+	writeEn = 1'b1;
+	colour = colour3;
+	end
+
+	else
+	begin
+	writeEn = 1'b1;
+	end
+	end
+	
+endmodule
+
+
+module triangleminion(
+input rawclock,
+input moveclock,
+input inerase,
+input [8:0]centerx,
+input [7:0]oldy,
+output wire[8:0]_x,
+output wire[7:0]_y,
+output wire[2:0]_colour,
+output reg yourturn,
+output reg erase
+);
+
+reg [2:0]taketurn;
+reg [8:0]x;
+reg [7:0]y;
+reg [2:0]colour;
+ 
+assign _x = x;
+assign _y = y;
+assign _colour = colour;
+
+
+always@ (posedge rawclock)
+begin
+
+if (moveclock)
+begin
+	yourturn = 1'b1;
+	if (oldy == 8'd30)
+	begin
+		yourturn <= 1'b0;
+		erase <= 1'b0;
+		x <= centerx;
+		y <= oldy;
+		colour <= 3'b111;
+	end
+	else if ((oldy == 8'd40) | (oldy == 8'd39) | (oldy == 8'd38))
+	begin
+		erase <= 1'b1;
+		yourturn <= 1'b0;
+		x <= centerx;
+		y <= oldy -1'b1;
+		colour <= 3'b111;
+	end
+	else if (oldy)
+	begin
+		x <= centerx;
+		y <= oldy - 2'b10;	//when it is a simple triangle
+		colour <= 3'b100;
+	end
+	else
+	begin
+		x <= centerx;
+		y <= 8'd230;
+		colour <= 3'b100;
+end
+end
+
+else if (yourturn & (taketurn == 3'b000))	//left side move
+begin
+x <= centerx- 1'b1;
+y <= oldy;
+taketurn <= taketurn +1'b1;
+colour <= 3'b001;
+yourturn <=1'b1;
+end
+
+else if (yourturn & (taketurn == 3'b001))	//right side move
+begin
+x <= centerx +1'b1;
+y <= oldy;
+taketurn <= taketurn +1'b1;
+colour <= 3'b001;
+yourturn <=1'b1;
+end
+
+else if (yourturn & (taketurn == 3'b010)) //front side move
+begin
+x <= centerx;
+y <= oldy - 1'b1;
+taketurn <= taketurn +1'b1;
+colour <= 3'b001;
+yourturn <=1'b1;
+end
+
+else if (yourturn & (taketurn == 3'b011))	//erase left back
+begin
+x <= centerx -1'b1;
+y <= oldy +2'b10;
+taketurn <= taketurn +1'b1;
+colour <= 3'b111;
+yourturn <=1'b1;
+end
+
+else if (yourturn & (taketurn == 3'b100))	//erase mid back
+begin
+x <= centerx;
+y <= oldy;
+taketurn <= taketurn+1'b1;
+colour <= 3'b111;
+yourturn <=1'b1;
+end
+
+else if (yourturn & (taketurn == 3'b101))	//erase right back
+begin
+x <= centerx + 1'b1;
+y <= oldy;
+colour <= 3'b111;
+taketurn <= taketurn + 1'b1;
+yourturn <= 1'b1;
+end
+
+else if (yourturn & (taketurn == 3'b110))	//temp final set
+begin
+taketurn <= 3'b000;
+yourturn <= 1'b0;
+end
+
+else if (inerase & (taketurn == 3'b000)) //erase right
+begin
+x <= centerx + 1'b1;
+y <= oldy;
+taketurn <= taketurn +1'b1;
+colour <= 3'b111;
+erase <= 1'b1;
+end
+
+else if (inerase & (taketurn == 3'b001))	//erase left
+begin
+x <= centerx - 1'b1;
+y <= oldy;
+taketurn <= taketurn +1'b1;
+colour <= 3'b111;
+erase <= 1'b1;
+end
+
+else if (inerase & (taketurn == 3'b010))	//erase front
+begin
+x <= centerx;
+y <= oldy -1'b1;
+taketurn <= taketurn +1'b1;
+colour <= 3'b111;
+erase <= 1'b1;
+end
+
+else if (inerase & (taketurn == 3'b011))	//final set for a plane
+begin
+x <= centerx;
+y <= 8'd30;
+colour <= 3'b111;
+erase <= 1'b0;
+end
+
+
+end
+
+endmodule
+
+
